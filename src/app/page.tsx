@@ -62,7 +62,7 @@ export default function Dashboard() {
             setLastUpdated(new Date());
         } catch (err) {
             console.error("Error fetching data:", err);
-            setError("Failed to fetch repository data. Please try again.");
+            setError("The name of the org doesn’t exist. Please check your spelling and try again.");
         } finally {
             setLoading(false);
         }
