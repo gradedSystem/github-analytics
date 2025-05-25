@@ -1,138 +1,87 @@
+import React from 'react';
 import {
-    Table,
-    TableBody,
-    TableCell,
-    TableContainer,
-    TableHead,
-    TableRow,
-    TablePagination,
-    Chip,
-    Box,
-    Typography,
-  } from "@mui/material";
-  import { useState } from "react";
-  import StarIcon from "@mui/icons-material/Star";
-  import ForkRightIcon from "@mui/icons-material/ForkRight";
-  import CodeIcon from "@mui/icons-material/Code";
-  import BugReportIcon from "@mui/icons-material/BugReport";
-  
-  interface Repo {
-    id: number;
-    name: string;
-    stargazers_count: number;
-    forks_count: number;
-    updated_at: string;
-    commits_count: number;
-    open_issues_count: number;
-    actions_count?: number;
-    last_action_date?: string;
-    last_action_by?: string;
-    is_bot_action?: boolean;
+  Table,
+  TableHeader,
+  TableRow,
+  TableHead,
+  TableBody,
+  TableCell,
+  TableCaption,
+} from "@/components/ui/table";
+import { ExternalLink } from 'lucide-react';
+
+// This interface should align with the one in page.tsx
+interface Repo {
+  id: number;
+  name: string;
+  html_url: string;
+  stargazers_count: number;
+  forks_count: number;
+  open_issues_count: number;
+  updated_at: string;
+  commits_count: number; 
+  language?: string;      
+}
+
+interface RepoTableProps {
+  repos: Repo[];
+}
+
+export const RepoTable: React.FC<RepoTableProps> = ({ repos }) => {
+  if (!repos || repos.length === 0) {
+    return <p className="text-muted-foreground text-center py-4">No repository data to display.</p>;
   }
-  
-  interface RepoTableProps {
-    repos: Repo[];
-  }
-  
-  export const RepoTable = ({ repos }: RepoTableProps) => {
-    const [page, setPage] = useState(0);
-    const [rowsPerPage, setRowsPerPage] = useState(10);
-  
-    const handleChangePage = (event: unknown, newPage: number) => {
-      setPage(newPage);
-    };
-  
-    const handleChangeRowsPerPage = (
-      event: React.ChangeEvent<HTMLInputElement>
-    ) => {
-      setRowsPerPage(parseInt(event.target.value, 10));
-      setPage(0);
-    };
-  
-    return (
-      <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-        <Box sx={{ flexGrow: 1, overflow: 'hidden' }}>
-          <TableContainer sx={{ maxHeight: 'calc(100% - 52px)' }}>
-            <Table size="small" stickyHeader>
-              <TableHead>
-                <TableRow>
-                  <TableCell>Repository</TableCell>
-                  <TableCell align="right" sx={{ minWidth: 100 }}>
-                    <Box display="flex" alignItems="center" justifyContent="flex-end">
-                      <StarIcon fontSize="small" sx={{ mr: 0.5 }} />
-                      Stars
-                    </Box>
-                  </TableCell>
-                  <TableCell align="right" sx={{ minWidth: 100 }}>
-                    <Box display="flex" alignItems="center" justifyContent="flex-end">
-                      <ForkRightIcon fontSize="small" sx={{ mr: 0.5 }} />
-                      Forks
-                    </Box>
-                  </TableCell>
-                  <TableCell align="right" sx={{ minWidth: 100 }}>
-                    <Box display="flex" alignItems="center" justifyContent="flex-end">
-                      <CodeIcon fontSize="small" sx={{ mr: 0.5 }} />
-                      Commits
-                    </Box>
-                  </TableCell>
-                  <TableCell align="right" sx={{ minWidth: 100 }}>
-                    <Box display="flex" alignItems="center" justifyContent="flex-end">
-                      <BugReportIcon fontSize="small" sx={{ mr: 0.5 }} />
-                      Issues
-                    </Box>
-                  </TableCell>
-                  <TableCell align="right" sx={{ minWidth: 120 }}>Last Updated</TableCell>
-                  <TableCell align="right" sx={{ minWidth: 100 }}>Last Action</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {repos
-                  .slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
-                  .map((repo) => (
-                    <TableRow key={repo.id} hover>
-                      <TableCell>
-                        <Typography variant="body2" fontWeight="medium">
-                          {repo.name}
-                        </Typography>
-                      </TableCell>
-                      <TableCell align="right">{repo.stargazers_count.toLocaleString()}</TableCell>
-                      <TableCell align="right">{repo.forks_count.toLocaleString()}</TableCell>
-                      <TableCell align="right">{repo.commits_count.toLocaleString()}</TableCell>
-                      <TableCell align="right">{repo.open_issues_count.toLocaleString()}</TableCell>
-                      <TableCell align="right">
-                        {new Date(repo.updated_at).toLocaleDateString()}
-                      </TableCell>
-                      <TableCell align="right">
-                        <Chip
-                          size="small"
-                          label={repo.is_bot_action ? "Bot" : "User"}
-                          color={repo.is_bot_action ? "info" : "success"}
-                          variant="outlined"
-                        />
-                      </TableCell>
-                    </TableRow>
-                  ))}
-              </TableBody>
-            </Table>
-          </TableContainer>
-        </Box>
-        <Box sx={{
-          position: 'sticky',
-          bottom: 0,
-          bgcolor: 'background.paper',
-          borderTop: '1px solid rgba(224, 224, 224, 1)',
-          zIndex: 2
-        }}>
-          <TablePagination
-            rowsPerPageOptions={[5, 10, 25]}
-            component="div"
-            count={repos.length}
-            rowsPerPage={rowsPerPage}
-            page={page}
-            onPageChange={handleChangePage}
-            onRowsPerPageChange={handleChangeRowsPerPage}
-          />
-        </Box>
-      </Box>
-    );
-  };
+
+  // Display only a subset of repos if the list is too long, e.g., top 25 by stars.
+  // This is a temporary measure until pagination or virtualization is implemented.
+  const displayedRepos = repos.length > 25 ? repos.slice(0, 25) : repos;
+
+  return (
+    <div className="overflow-x-auto rounded-md border">
+      <Table>
+        {repos.length > 10 && (
+            <TableCaption className="py-3 text-sm">
+                Showing {displayedRepos.length} of {repos.length} repositories.
+                {repos.length > displayedRepos.length && " (Full list truncated for performance)"}
+            </TableCaption>
+        )}
+        <TableHeader>
+          <TableRow>
+            <TableHead className="whitespace-nowrap px-3 py-2 sm:px-4 sm:py-3">Name</TableHead>
+            <TableHead className="text-right whitespace-nowrap px-3 py-2 sm:px-4 sm:py-3">Stars</TableHead>
+            <TableHead className="text-right whitespace-nowrap px-3 py-2 sm:px-4 sm:py-3">Forks</TableHead>
+            <TableHead className="text-right whitespace-nowrap px-3 py-2 sm:px-4 sm:py-3">Open Issues</TableHead>
+            <TableHead className="text-right whitespace-nowrap px-3 py-2 sm:px-4 sm:py-3">Commits</TableHead>
+            <TableHead className="whitespace-nowrap px-3 py-2 sm:px-4 sm:py-3">Language</TableHead>
+            <TableHead className="text-right whitespace-nowrap px-3 py-2 sm:px-4 sm:py-3">Last Updated</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {displayedRepos.map((repo) => (
+            <TableRow key={repo.id} className="hover:bg-muted/50">
+              <TableCell className="font-medium whitespace-nowrap px-3 py-2 sm:px-4 sm:py-3">
+                <a
+                  href={repo.html_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="hover:underline text-primary flex items-center group text-sm"
+                >
+                  {repo.name}
+                  <ExternalLink className="ml-1.5 h-3.5 w-3.5 text-muted-foreground group-hover:text-primary transition-colors" />
+                </a>
+              </TableCell>
+              <TableCell className="text-right whitespace-nowrap px-3 py-2 sm:px-4 sm:py-3 text-sm">{repo.stargazers_count.toLocaleString()}</TableCell>
+              <TableCell className="text-right whitespace-nowrap px-3 py-2 sm:px-4 sm:py-3 text-sm">{repo.forks_count.toLocaleString()}</TableCell>
+              <TableCell className="text-right whitespace-nowrap px-3 py-2 sm:px-4 sm:py-3 text-sm">{repo.open_issues_count.toLocaleString()}</TableCell>
+              <TableCell className="text-right whitespace-nowrap px-3 py-2 sm:px-4 sm:py-3 text-sm">{repo.commits_count.toLocaleString()}</TableCell>
+              <TableCell className="whitespace-nowrap px-3 py-2 sm:px-4 sm:py-3 text-sm">{repo.language || 'N/A'}</TableCell>
+              <TableCell className="text-right whitespace-nowrap px-3 py-2 sm:px-4 sm:py-3 text-sm">
+                {new Date(repo.updated_at).toLocaleDateString()}
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </div>
+  );
+};
