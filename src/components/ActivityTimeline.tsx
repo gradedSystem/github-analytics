@@ -32,8 +32,8 @@ import {
       const now = new Date();
       const diffMs = now.getTime() - date.getTime();
 
-      // Handle just now case
-      if (diffMs < 60000) {
+      // Show "Just now" for actions within the last 2 minutes
+      if (diffMs < 120000) {
         return "Just now";
       }
 
