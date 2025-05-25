@@ -8,6 +8,24 @@ const redis = process.env.UPSTASH_REDIS_URL ? new Redis({
 
 const CACHE_TTL = 3600;
 const DETAILED_REPOS_LIMIT = 5;
+const CONTRIBUTOR_REPOS_LIMIT = 15; // Limit for fetching contributors
+
+// Interfaces for Contributor Data
+interface GitHubContributor {
+    login: string;
+    id: number;
+    avatar_url: string;
+    html_url: string;
+    contributions: number;
+}
+
+interface AggregatedContributor {
+    login: string;
+    avatar_url: string;
+    html_url: string;
+    total_contributions: number;
+    repos_contributed_to: string[];
+}
 
 const getGitHubHeaders = () => ({
     'Accept': 'application/vnd.github.v3+json',
@@ -136,59 +154,151 @@ async function enhanceRepoData(org: string, repo: any): Promise<any> {
     }
 }
 
+async function fetchRepoContributors(org: string, repoName: string): Promise<GitHubContributor[]> {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000); // Shorter timeout for individual repo contributor fetch
+
+    try {
+        const response = await fetch(
+            `https://api.github.com/repos/${org}/${repoName}/contributors?per_page=100`, // Get top 100 contributors
+            { headers: getGitHubHeaders(), signal: controller.signal }
+        );
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+            if (response.status === 404 || response.status === 204) { // 204 for empty repo
+                console.warn(`Contributors not found or repo empty for ${org}/${repoName} (status: ${response.status})`);
+                return []; // Return empty array if repo not found or no contributors
+            }
+            throw new Error(`Failed to fetch contributors for ${org}/${repoName}: ${response.statusText}`);
+        }
+        
+        const contributors: GitHubContributor[] = await response.json();
+        return contributors.filter(c => c.type !== 'Bot'); // Filter out bots if GitHub API includes them by type
+    } catch (error) {
+        clearTimeout(timeoutId);
+        if (error instanceof Error && error.name === 'AbortError') {
+            console.error(`Request for contributors of ${org}/${repoName} timed out.`);
+            return []; // Return empty on timeout
+        }
+        console.error(`Error fetching contributors for ${org}/${repoName}:`, error);
+        return []; // Return empty on other errors
+    }
+}
+
+
 export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const org = searchParams.get('org') || 'datasets';
-    const cacheKey = `github-analytics:${org}:all`;
+    const type = searchParams.get('type') || 'repositories'; // Default to 'repositories'
 
     const headers = {
         'Cache-Control': 'public, s-maxage=3600, stale-while-revalidate=86400',
     };
 
     try {
-        if (redis) {
-            const cachedData = await redis.get(cacheKey);
-            if (cachedData) {
-                return NextResponse.json(cachedData, { headers });
+        if (type === 'contributors') {
+            const cacheKey = `github-analytics:${org}:contributors`;
+            if (redis) {
+                const cachedData = await redis.get(cacheKey);
+                if (cachedData) {
+                    return NextResponse.json(cachedData, { headers });
+                }
             }
+
+            const allReposRaw = await fetchAllRepos(org);
+            // Sort by stars and take top N for contributor analysis
+            const topReposForContributors = allReposRaw
+                .sort((a, b) => b.stargazers_count - a.stargazers_count)
+                .slice(0, CONTRIBUTOR_REPOS_LIMIT);
+
+            const aggregatedContributors: Record<string, AggregatedContributor> = {};
+
+            for (const repo of topReposForContributors) {
+                const contributors = await fetchRepoContributors(org, repo.name);
+                for (const contributor of contributors) {
+                    if (!aggregatedContributors[contributor.login]) {
+                        aggregatedContributors[contributor.login] = {
+                            login: contributor.login,
+                            avatar_url: contributor.avatar_url,
+                            html_url: contributor.html_url,
+                            total_contributions: 0,
+                            repos_contributed_to: [],
+                        };
+                    }
+                    aggregatedContributors[contributor.login].total_contributions += contributor.contributions;
+                    if (!aggregatedContributors[contributor.login].repos_contributed_to.includes(repo.name)) {
+                        aggregatedContributors[contributor.login].repos_contributed_to.push(repo.name);
+                    }
+                }
+            }
+
+            const sortedContributorsList = Object.values(aggregatedContributors)
+                .sort((a, b) => b.total_contributions - a.total_contributions);
+
+            if (redis) {
+                await redis.set(cacheKey, sortedContributorsList, { ex: CACHE_TTL });
+            }
+            return NextResponse.json(sortedContributorsList, { headers });
+
+        } else { // Existing logic for fetching repositories
+            const cacheKey = `github-analytics:${org}:all`; // Original cache key for repos
+            if (redis) {
+                const cachedData = await redis.get(cacheKey);
+                if (cachedData) {
+                    return NextResponse.json(cachedData, { headers });
+                }
+            }
+
+            const allRepos = await fetchAllRepos(org);
+            const reposWithDetails = allRepos.map((repo: any) => ({
+                id: repo.id,
+                name: repo.name,
+                description: repo.description,
+                html_url: repo.html_url,
+                stargazers_count: repo.stargazers_count,
+                forks_count: repo.forks_count,
+                updated_at: repo.updated_at,
+                open_issues_count: repo.open_issues_count,
+                language: repo.language,
+                commits_count: 0, // This will be enhanced by enhanceRepoData
+                actions: [],      // This will be enhanced by enhanceRepoData
+                // The following fields are just placeholders if enhanceRepoData fails or is not called for all.
+                actions_count: Math.floor(Math.random() * 20) + 1, 
+                last_action_date: new Date(Date.now() - Math.floor(Math.random() * 7 * 86400000)).toISOString(),
+                last_action_by: Math.random() > 0.5 ? "github-actions[bot]" : "real-user",
+                is_bot_action: Math.random() > 0.5 
+            }));
+
+            if (reposWithDetails.length > 0) {
+                const detailedCount = Math.min(DETAILED_REPOS_LIMIT, reposWithDetails.length);
+                const enhancedReposPromises = reposWithDetails.slice(0, detailedCount).map(repo => enhanceRepoData(org, repo));
+                const enhancedResults = await Promise.all(enhancedReposPromises);
+                
+                enhancedResults.forEach((enhancedRepo, index) => {
+                    reposWithDetails[index] = { ...reposWithDetails[index], ...enhancedRepo };
+                });
+            }
+
+            if (redis) {
+                await redis.set(cacheKey, reposWithDetails, { ex: CACHE_TTL });
+            }
+            return NextResponse.json(reposWithDetails, { headers });
         }
-
-        const allRepos = await fetchAllRepos(org);
-        const reposWithDetails = allRepos.map((repo: any) => ({
-            id: repo.id,
-            name: repo.name,
-            description: repo.description,
-            html_url: repo.html_url,
-            stargazers_count: repo.stargazers_count,
-            forks_count: repo.forks_count,
-            updated_at: repo.updated_at,
-            open_issues_count: repo.open_issues_count,
-            language: repo.language,
-            commits_count: 0,
-            actions: [],
-            actions_count: Math.floor(Math.random() * 20) + 1,
-            last_action_date: new Date(Date.now() - Math.floor(Math.random() * 7 * 86400000)).toISOString(),
-            last_action_by: Math.random() > 0.5 ? "github-actions[bot]" : "real-user",
-            is_bot_action: Math.random() > 0.5
-        }));
-
-        if (reposWithDetails.length > 0) {
-            const detailedCount = Math.min(DETAILED_REPOS_LIMIT, reposWithDetails.length);
-            const enhancedRepos = await Promise.all(
-                reposWithDetails.slice(0, detailedCount).map(repo => enhanceRepoData(org, repo))
-            );
-            enhancedRepos.forEach((enhancedRepo, index) => {
-                reposWithDetails[index] = enhancedRepo;
-            });
-        }
-
-        if (redis) {
-            await redis.set(cacheKey, reposWithDetails, { ex: CACHE_TTL });
-        }
-
-        return NextResponse.json(reposWithDetails, { headers });
     } catch (error) {
-        console.error('Error:', error);
-        return NextResponse.json({ error: 'Failed to fetch repository data' }, { status: 500 });
+        if (error instanceof Error && error.message.startsWith('Organization') && error.message.endsWith('not found')) {
+            const orgNameMatch = error.message.match(/Organization(?: ')?([^']*)'(?: not found)?/); // Adjusted regex
+            const orgName = orgNameMatch ? orgNameMatch[1] : 'unknown';
+            return NextResponse.json(
+                { error: "Organization not found", message: `The organization '${orgName}' was not found on GitHub.` },
+                { status: 404 }
+            );
+        } else {
+            console.error('Unhandled API Error:', error);
+            return NextResponse.json(
+                { error: "Internal server error", message: "An unexpected error occurred while fetching data from GitHub." },
+                { status: 500 }
+            );
+        }
     }
 }
